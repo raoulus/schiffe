@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Schiffe">
+<title>Schiffe versenken</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+/* Seekarte: gegnerisches Gewässer groß oben, eigene Flotte klein darunter */
+:root{
+  --bg:#e9eef0; --paper:#f6f8f8; --ink:#16303d; --muted:#5d7380; --grid:#b9c9d0;
+  --sea:#d6e4ea; --ship:#3d5a68; --hit:#d2462f; --miss:#7f97a3; --sunk:#7a2416; --accent:#0f6e8c; --ok:#2f8a5b;
+  --display:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0c171d; --paper:#122229; --ink:#dbe7ec; --muted:#8aa1ac; --grid:#2a434f;
+  --sea:#17303b; --ship:#6f8f9e; --hit:#f0644b; --miss:#4e6b78; --sunk:#b23a24; --accent:#4fb3d3; --ok:#5cc28d; color-scheme:dark}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))}
+[hidden]{display:none!important}
+.wrap{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:900;font-size:2.4rem;line-height:1;margin:0;text-transform:uppercase}
+.pill{font-size:.72rem;padding:4px 9px;border-radius:99px;border:1px solid var(--grid);color:var(--muted);display:flex;gap:6px;align-items:center}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--miss)}
+.pill.on{color:var(--ink)}.pill.on::before{background:var(--ok)}
+.pill.off::before{background:var(--hit)}
+.status{background:var(--paper);border:1px solid var(--grid);border-radius:6px;padding:10px 12px;font-size:.9rem;line-height:1.45}
+.status.myturn{border-color:var(--accent);box-shadow:inset 4px 0 0 var(--accent)}
+.status b{color:var(--accent)}
+.label{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:.08em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.label small{font-family:var(--mono);font-weight:400;font-size:.72rem;color:var(--muted);letter-spacing:.02em;text-transform:none}
+.board{display:grid;grid-template-columns:repeat(11,1fr);gap:2px;width:100%}
+.small .board{width:72%}
+.coord{font-size:.66rem;color:var(--muted);display:flex;align-items:center;justify-content:center;aspect-ratio:1}
+.cell{aspect-ratio:1;background:var(--sea);border:0;border-radius:2px;padding:0;position:relative;font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+button.cell:disabled{cursor:default}
+.cell.ship{background:var(--ship)}
+.cell.miss::after{content:"";position:absolute;inset:38%;border-radius:50%;background:var(--miss)}
+.cell.hit{background:var(--hit)}
+.cell.hit::after{content:"✕";position:absolute;inset:0;display:grid;place-items:center;color:var(--paper);font-weight:600;font-size:.8em}
+.cell.sunk{background:var(--sunk)}
+.cell.last{outline:2px solid var(--ink);outline-offset:-2px}
+.cell.pop{animation:pop .35s ease-out}
+@keyframes pop{from{transform:scale(1.35)}to{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.cell.pop{animation:none}}
+.fleet{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.72rem;color:var(--muted);margin-top:8px}
+.fleet .gone{text-decoration:line-through;color:var(--hit)}
+.controls,.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font:600 .85rem var(--mono);padding:10px 14px;border-radius:6px;border:1px solid var(--ink);background:transparent;color:var(--ink)}
+.btn.primary{background:var(--ink);color:var(--paper)}
+.btn:disabled{opacity:.4}
+.panel{background:var(--paper);border:1px solid var(--grid);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel h2{font-family:var(--display);font-weight:700;font-size:1.3rem;letter-spacing:.06em;text-transform:uppercase;margin:0}
+.panel p{margin:0;font-size:.85rem;color:var(--muted);line-height:1.5}
+.field{font:600 16px var(--mono);padding:10px 12px;border-radius:6px;border:1px solid var(--grid);background:var(--bg);color:var(--ink);min-width:0;flex:1}
+#codeIn{text-transform:uppercase;letter-spacing:.2em;max-width:9ch}
+.bigcode{font-family:var(--display);font-weight:900;font-size:3.4rem;letter-spacing:.18em;line-height:1}
+.err{color:var(--hit);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Schiffe versenken</h1>
+    <div class="pill" id="pill">offline</div>
+  </header>
+
+  <div id="lobby" style="display:flex;flex-direction:column;gap:20px">
+    <div class="status" id="lobbyStatus">Beide Handys am besten im selben WLAN.</div>
+    <label class="panel" for="nameIn">
+      <h2>Dein Name</h2>
+      <input class="field" id="nameIn" maxlength="16" placeholder="z. B. Mila" autocomplete="off">
+    </label>
+    <div class="panel">
+      <h2>Neues Spiel</h2>
+      <p>Du bekommst einen Code mit vier Buchstaben. Den gibst du deinem Gegner.</p>
+      <div class="row"><button class="btn primary" id="createBtn">Spiel erstellen</button></div>
+    </div>
+    <div class="panel">
+      <h2>Beitreten</h2>
+      <p>Gib den Code vom anderen Handy ein.</p>
+      <div class="row">
+        <input class="field" id="codeIn" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
+        <button class="btn primary" id="joinBtn">Beitreten</button>
+      </div>
+      <div class="err" id="lobbyErr" hidden></div>
+    </div>
+  </div>
+
+  <div id="game" hidden style="display:flex;flex-direction:column;gap:18px">
+    <div id="waiting" class="panel" hidden>
+      <p>Gib deinem Gegner diesen Code:</p>
+      <div class="bigcode" id="bigCode"></div>
+      <p>Er öffnet diese Seite auf seinem Handy und tippt auf „Beitreten“. Lass den Bildschirm solange an.</p>
+    </div>
+    <div class="status" id="status" role="status"></div>
+    <div class="row" id="reconnectRow" hidden><button class="btn primary" id="reconnectBtn">Neu verbinden</button></div>
+    <section>
+      <div class="label"><span id="enemyTitle">Gegner</span> <small id="enemyLeft"></small></div>
+      <div class="board" id="enemyBoard"></div>
+      <div class="fleet" id="enemyFleet"></div>
+    </section>
+    <section class="small">
+      <div class="label">Deine Flotte <small id="ownLeft"></small></div>
+      <div class="board" id="ownBoard"></div>
+    </section>
+    <div class="controls">
+      <button class="btn" id="shuffle">Flotte neu aufstellen</button>
+      <button class="btn primary" id="rematch" hidden>Revanche</button>
+      <button class="btn" id="leave">Spiel verlassen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const N=10, COLS="ABCDEFGHIJ", PREFIX="schiffe-versenken-de-";
+const FLEET=[["Schlachtschiff",5],["Kreuzer",4],["Zerstörer",3],["U-Boot",3],["Schnellboot",2]];
+const $=id=>document.getElementById(id);
+const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const EMPTY=".".repeat(N*N);
+
+/* Spielstand dieses Handys. Die eigene Flotte verlässt nie das Handy. */
+let S=null;          // {code, host, name, oppName, fleet, recv, sent, sunk:[{name,cells}], mySunk, turn, seq, over, winner, oppFleet, last, starter}
+let peer=null, conn=null, busy=false, lastKey="";
+
+$("nameIn").value=store.get("sv-name")||"";
+$("nameIn").addEventListener("change",()=>store.set("sv-name",$("nameIn").value.trim()));
+const save=()=>store.set("sv-state",S);
+
+function randomFleet(){
+  const g=Array(N*N).fill(".");
+  FLEET.forEach(([,len],id)=>{for(;;){
+    const h=Math.random()<.5,r=Math.floor(Math.random()*(h?N:N-len+1)),c=Math.floor(Math.random()*(h?N-len+1:N));
+    const cells=[...Array(len)].map((_,i)=>(r+(h?0:i))*N+c+(h?i:0));
+    if(cells.every(i=>{const y=Math.floor(i/N),x=i%N;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<N&&xx>=0&&xx<N&&g[yy*N+xx]!==".")return false}return true})){cells.forEach(i=>g[i]=String(id));break}
+  }});
+  return g.join("");
+}
+function newRound(starter){
+  Object.assign(S,{fleet:randomFleet(),recv:EMPTY,sent:EMPTY,sunk:[],turn:starter,seq:0,over:false,winner:null,oppFleet:null,last:null,starter});
+}
+const me=()=>S.host?1:2, opp=()=>S.host?2:1;
+const shipSunk=(fleet,shots,id)=>{for(let i=0;i<N*N;i++)if(fleet[i]===String(id)&&shots[i]!=="x")return false;return true};
+const myAfloat=()=>FLEET.filter((_,id)=>!shipSunk(S.fleet,S.recv,id)).length;
+const shotsFired=()=>(S.recv+S.sent).replace(/\./g,"").length;
+const posName=i=>COLS[i%N]+(Math.floor(i/N)+1);
+
+/* Bretter */
+function buildBoard(el,isEnemy){
+  el.innerHTML="";
+  el.appendChild(Object.assign(document.createElement("div"),{className:"coord"}));
+  for(let c=0;c<N;c++)el.appendChild(Object.assign(document.createElement("div"),{className:"coord",textContent:COLS[c]}));
+  for(let r=0;r<N;r++){
+    el.appendChild(Object.assign(document.createElement("div"),{className:"coord",textContent:r+1}));
+    for(let c=0;c<N;c++){
+      const x=document.createElement(isEnemy?"button":"div");x.className="cell";x.dataset.i=r*N+c;
+      if(isEnemy){x.setAttribute("aria-label",COLS[c]+(r+1));x.addEventListener("click",()=>fire(r*N+c))}
+      el.appendChild(x);
+    }
+  }
+}
+buildBoard($("enemyBoard"),true);buildBoard($("ownBoard"),false);
+const cellAt=(el,i)=>el.querySelector(`[data-i="${i}"]`);
+
+function render(){
+  if(!S)return;
+  const connected=conn&&conn.open, started=!!S.oppName;
+  const myTurn=connected&&started&&!S.over&&S.turn===me();
+  $("waiting").hidden=started; $("bigCode").textContent=S.code;
+  $("enemyTitle").textContent=S.oppName||"Gegner";
+  // eigene Flotte
+  for(let i=0;i<N*N;i++){
+    const x=cellAt($("ownBoard"),i),id=S.fleet[i],s=S.recv[i];let c="cell";
+    if(id!==".")c+=" ship";if(s==="o")c+=" miss";if(s==="x")c+=shipSunk(S.fleet,S.recv,+id)?" hit sunk":" hit";
+    if(S.last&&S.last.by===opp()&&S.last.i===i)c+=" last";x.className=c;
+  }
+  // gegnerisches Gewässer
+  const sunkCells=new Set(S.sunk.flatMap(s=>s.cells));
+  for(let i=0;i<N*N;i++){
+    const x=cellAt($("enemyBoard"),i),s=S.sent[i];let c="cell";
+    if(S.oppFleet&&S.oppFleet[i]!==".")c+=" ship";
+    if(s==="o")c+=" miss";if(s==="x")c+=sunkCells.has(i)?" hit sunk":" hit";
+    if(S.last&&S.last.by===me()&&S.last.i===i)c+=" last";
+    x.className=c;x.disabled=!myTurn||busy||s!==".";
+  }
+  $("ownLeft").textContent=myAfloat()+" von 5 Schiffen schwimmen";
+  $("enemyLeft").textContent=started?(5-S.sunk.length)+" von 5 Schiffen schwimmen":"";
+  const sunkNames=S.sunk.map(s=>s.name);
+  $("enemyFleet").innerHTML=FLEET.map(([n,l])=>{const k=sunkNames.indexOf(n);if(k>=0)sunkNames.splice(k,1);return`<span class="${k>=0?"gone":""}">${n} (${l})</span>`}).join("");
+  $("shuffle").hidden=S.over;$("shuffle").disabled=shotsFired()>0;
+  $("rematch").hidden=!S.over;
+  $("reconnectRow").hidden=connected||!S;
+  const pill=$("pill");pill.className="pill "+(connected?"on":"off");pill.textContent=connected?"verbunden":(peer&&!peer.disconnected?"warte …":"getrennt");
+
+  const L=S.last,key=L?L.by+"-"+L.i+"-"+S.seq:"";
+  if(key&&key!==lastKey){const x=cellAt(L.by===me()?$("enemyBoard"):$("ownBoard"),L.i);x.classList.remove("pop");void x.offsetWidth;x.classList.add("pop")}
+  lastKey=key;
+
+  const on=S.oppName||"Gegner";
+  const lastTxt=L?`${L.by===me()?"Du":on}: ${posName(L.i)} – ${L.res==="o"?"Wasser.":L.sunk?L.sunk+" versenkt!":"Treffer!"} `:"";
+  let t;
+  if(!started)t="Warte auf deinen Gegner. Du kannst deine Flotte solange neu aufstellen.";
+  else if(S.over)t=S.winner===me()?`<b>Gewonnen!</b> Die Flotte von ${esc(on)} liegt auf dem Meeresgrund.`:`<b>Verloren.</b> ${esc(on)} hat deine Flotte versenkt.`;
+  else if(!connected)t=`Die Verbindung zu ${esc(on)} ist weg. Tippe auf „Neu verbinden“, der Spielstand bleibt erhalten.`;
+  else if(myTurn)t=esc(lastTxt)+"<b>Du bist dran.</b> Tippe ein Feld oben an.";
+  else t=esc(lastTxt)+`${esc(on)} ist dran …`;
+  $("status").innerHTML=t;$("status").classList.toggle("myturn",myTurn);
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* Nachrichten */
+function send(m){if(conn&&conn.open)conn.send(m)}
+function hello(){send({t:"hello",name:S.name,recv:S.recv,mySunkReport:null,turn:S.turn,seq:S.seq,over:S.over,winner:S.winner,starter:S.starter,fleetIfOver:S.over?S.fleet:null})}
+
+function fire(i){
+  if(busy||!conn||!conn.open||S.over||S.turn!==me()||S.sent[i]!==".")return;
+  busy=true;render();send({t:"shot",i,seq:S.seq});
+  setTimeout(()=>{if(busy){busy=false;render()}},4000);
+}
+
+function onMessage(m){
+  if(!m||typeof m!=="object")return;
+  if(m.t==="hello"){
+    S.oppName=String(m.name||"Gegner").slice(0,16);
+    // Abgleich nach Neuverbindung: wer mehr Schüsse kennt, hat den aktuelleren Zug
+    if(typeof m.seq==="number"&&m.seq>S.seq){S.turn=m.turn;S.seq=m.seq}
+    if(m.over&&!S.over){S.over=true;S.winner=m.winner}
+    if(m.fleetIfOver)S.oppFleet=m.fleetIfOver;
+    save();render();
+  }
+  else if(m.t==="shot"){
+    const i=m.i|0;if(i<0||i>=N*N||S.over)return;
+    let res,sunk=null,cells=null;
+    if(S.recv[i]!=="."){res=S.recv[i]}  // doppelt angekommen: gleiche Antwort
+    else{res=S.fleet[i]!=="."?"x":"o";S.recv=S.recv.slice(0,i)+res+S.recv.slice(i+1);S.seq++}
+    if(res==="x"){const id=+S.fleet[i];if(shipSunk(S.fleet,S.recv,id)){sunk=FLEET[id][0];cells=[...S.fleet].map((c,k)=>c===String(id)?k:-1).filter(k=>k>=0)}}
+    const lost=myAfloat()===0;
+    S.last={by:opp(),i,res,sunk};
+    if(lost){S.over=true;S.winner=opp()}else if(res==="o")S.turn=me();
+    save();render();
+    send({t:"result",i,res,sunk,cells,lost,fleet:lost?S.fleet:null});
+  }
+  else if(m.t==="result"){
+    busy=false;
+    const i=m.i|0;if(S.sent[i]!=="."){render();return}
+    S.sent=S.sent.slice(0,i)+(m.res==="x"?"x":"o")+S.sent.slice(i+1);S.seq++;
+    if(m.sunk&&Array.isArray(m.cells))S.sunk.push({name:String(m.sunk),cells:m.cells.map(n=>n|0)});
+    S.last={by:me(),i,res:m.res,sunk:m.sunk||null};
+    if(m.lost){S.over=true;S.winner=me();S.oppFleet=m.fleet||null;send({t:"reveal",fleet:S.fleet})}
+    else if(m.res==="o")S.turn=opp();
+    save();render();
+  }
+  else if(m.t==="reveal"){S.oppFleet=typeof m.fleet==="string"?m.fleet:null;save();render()}
+  else if(m.t==="rematch"){newRound(m.starter);save();lastKey="";render()}
+}
+
+function attach(c){
+  if(conn&&conn!==c){try{conn.close()}catch(e){}}
+  conn=c;
+  c.on("open",()=>{hello();render()});
+  c.on("data",onMessage);
+  c.on("close",()=>{if(conn===c){busy=false;render()}});
+  c.on("error",()=>render());
+  if(c.open){hello();render()}
+}
+
+/* Verbindungsaufbau über PeerJS */
+function startHost(code,onFail){
+  peer=new Peer(PREFIX+code);
+  peer.on("open",()=>render());
+  peer.on("connection",c=>attach(c));
+  peer.on("disconnected",()=>{render();setTimeout(()=>{try{if(peer&&peer.disconnected&&!peer.destroyed)peer.reconnect()}catch(e){}},2000)});
+  peer.on("error",e=>{
+    if(e.type==="unavailable-id"){if(onFail)onFail();else{peer.destroy();setTimeout(()=>startHost(code),3000)}}
+    else if(e.type==="network"||e.type==="server-error"||e.type==="socket-error"){$("status").textContent="Keine Verbindung zum Vermittlungsdienst. Prüfe das Internet.";}
+    render();
+  });
+}
+function startGuest(code,onFail){
+  peer=new Peer();
+  peer.on("open",()=>{attach(peer.connect(PREFIX+code,{reliable:true,serialization:"json"}))});
+  peer.on("error",e=>{if(e.type==="peer-unavailable"&&onFail)onFail();else if(e.type==="peer-unavailable")$("status").textContent="Das andere Handy ist gerade nicht erreichbar. Ist die Seite dort offen?";render()});
+  peer.on("disconnected",()=>render());
+}
+function reconnect(){
+  if(!S)return;
+  try{if(peer)peer.destroy()}catch(e){}
+  peer=null;conn=null;
+  S.host?startHost(S.code):startGuest(S.code);
+  render();
+}
+
+function showGame(){$("lobby").hidden=true;$("game").hidden=false;render()}
+function newCode(){const A="ABCDEFGHJKLMNPQRSTUVWXYZ";return[...Array(4)].map(()=>A[Math.floor(Math.random()*A.length)]).join("")}
+function lobbyErr(t){$("lobbyErr").textContent=t;$("lobbyErr").hidden=!t}
+function peerReady(){if(typeof Peer==="undefined"){$("lobbyStatus").textContent="Die Verbindungsbibliothek konnte nicht geladen werden. Prüfe das Internet und lade die Seite neu.";return false}return true}
+
+$("createBtn").onclick=()=>{
+  if(!peerReady())return;
+  const code=newCode();
+  S={code,host:true,name:$("nameIn").value.trim()||"Spieler 1",oppName:null};newRound(1);save();
+  startHost(code,()=>{peer.destroy();$("createBtn").click()});
+  showGame();
+};
+$("codeIn").addEventListener("input",()=>{$("codeIn").value=$("codeIn").value.toUpperCase().replace(/[^A-Z]/g,"")});
+$("codeIn").addEventListener("keydown",e=>{if(e.key==="Enter")$("joinBtn").click()});
+$("joinBtn").onclick=()=>{
+  if(!peerReady())return;
+  const code=$("codeIn").value.trim();lobbyErr("");
+  if(code.length!==4)return lobbyErr("Der Code hat vier Buchstaben.");
+  const old=store.get("sv-state");
+  if(old&&old.code===code&&!old.host)S=old;   // gleiches Spiel: Stand behalten
+  else{S={code,host:false,name:$("nameIn").value.trim()||"Spieler 2",oppName:null};newRound(1)}
+  save();
+  $("joinBtn").disabled=true;
+  startGuest(code,()=>{try{peer.destroy()}catch(e){}peer=null;S=null;store.set("sv-state",null);$("joinBtn").disabled=false;lobbyErr(`Kein Spiel mit dem Code ${code} gefunden. Ist die Seite auf dem anderen Handy offen?`)});
+  const wait=setInterval(()=>{if(conn&&conn.open){clearInterval(wait);$("joinBtn").disabled=false;showGame()}else if(!S){clearInterval(wait)}},200);
+};
+$("shuffle").onclick=()=>{if(shotsFired()===0){S.fleet=randomFleet();save();render()}};
+$("rematch").onclick=()=>{const starter=S.winner===1?2:1;newRound(starter);save();lastKey="";send({t:"rematch",starter});render()};
+$("reconnectBtn").onclick=reconnect;
+$("leave").hidden=false;
+let leaveArmed=false;
+$("leave").onclick=()=>{
+  if(!leaveArmed&&S&&!S.over&&S.oppName){leaveArmed=true;$("leave").textContent="Wirklich verlassen?";setTimeout(()=>{leaveArmed=false;$("leave").textContent="Spiel verlassen"},3000);return}
+  leaveArmed=false;$("leave").textContent="Spiel verlassen";
+  try{if(conn)conn.close();if(peer)peer.destroy()}catch(e){}
+  peer=null;conn=null;S=null;store.set("sv-state",null);
+  $("game").hidden=true;$("lobby").hidden=false;$("pill").className="pill";$("pill").textContent="offline";
+};
+
+// Nach dem Entsperren automatisch neu verbinden
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&S&&!(conn&&conn.open))setTimeout(reconnect,300)});
+
+// Laufendes Spiel nach Neuladen fortsetzen
+(function(){const old=store.get("sv-state");if(old&&old.code&&peerReady()){S=old;showGame();reconnect()}})();
+</script>
+</body>
+</html>
